@@ -1,0 +1,383 @@
+---
+title: "Using neural network to predict close price of A Index"
+author: "ZhouDan"
+date: "2016年5月31日"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Neural Network
+
+Here,I'm trying to represent my RPROP neural network.
+If you can come up with my steps,I'm sure you can understand what I do.
+
+##First,let's set the working directory.
+And then read the raw data into R.
+
+```{r one}
+getwd()
+setwd('/Users/zhoudan/Neural Network')
+A_index<-data.frame(read.csv("A_index.csv",header=T))
+head(A_index)
+A_index$X<-NULL
+A_index$index<-NULL
+head(A_index)
+```
+
+## Data preprocession
+
+Check if exist NA and finish data cleaning
+
+```{r two}
+apply(A_index, 2, function(x) sum(is.na(x)))
+dates<-as.Date(A_index[,1])
+A_index$date<-NULL
+head(A_index)
+nrow(A_index)
+```
+
+Split the dataset into train dataset and test dataset and normalized the data.
+
+```{r three}
+train<-A_index[c(0:500),]
+test<-A_index[c(501:623),]
+scaled<-as.data.frame(scale(A_index))
+train_<-scaled[c(0:500),]
+test_<-scaled[c(501:623),]
+head(train_)
+head(test_)
+
+```
+
+##Correlation analysis
+
+```{r}
+cor(A_index)
+```
+
+## Building the model
+Library neuralnet package and try to build the neural network model
+
+```{r four}
+library(neuralnet)
+n<-names(train_)
+f <- as.formula(paste("close ~", paste(n[!n %in% "close"], collapse = " + ")))
+nn_1<-neuralnet(f,data=train_,hidden=2,linear.output=TRUE)
+nn_1
+par(mfrow=c(1,1))
+plot.nn(nn_1)
+nn_2<-neuralnet(f,data=train_,hidden=3,linear.output=TRUE)
+nn_2
+par(mfrow=c(1,1))
+plot.nn(nn_2)
+```
+
+View the neural network structure and the content of the model
+
+```{r five}
+ls(nn_2)
+nn_2$result.matrix
+nn_2$net.result[[1]][1:20]
+nn_2$covariate[1:20]
+out<-cbind(nn_2$covariate,nn_2$net.result[[1]])
+n
+dimnames(out)<-list(NULL,c("open","high","low","volume","nn-output"))
+head(out)
+head(nn_2$generalized.weights[[1]])
+```
+
+Generalized weights
+
+```{r six}
+par(mfrow=c(2,2))
+gwplot(nn_2,selected.covariate="open",min=-50,max=50)
+gwplot(nn_2,selected.covariate="high",min=-50,max=50)
+gwplot(nn_2,selected.covariate="low",min=-50,max=50)
+gwplot(nn_2,selected.covariate="volume",min=-50,max=50)
+```
+
+Using the model to predict the close price
+
+```{r seven}
+test_$close<-NULL
+head(test_)
+pr.nn<-compute(nn_2,test_)
+ls(pr.nn)
+pr.nn$net.result[1:20]
+pr.nn_result<-pr.nn$net.result*sd(A_index$close)+mean(A_index$close)
+test_.result<-test$close
+pr.nn_result[1:20]
+```
+
+Plot the prediction
+
+```{r eight}
+par(mfrow=c(1,1))
+fig_1<-plot(test$close,pr.nn_result,ylab="Model nn_2 predict value",xlab="Real value",ylim=c(2000,2500),col="red",main="Real vs Predicted Neural Network",pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend("bottomright",legend="NN",pch=18,col="red",bty="n")
+```
+
+Result table for prediction vs real value and MSE
+
+```{r nine}
+new_dates<-dates[c(501:623)]
+result<-data.frame(new_dates,test$close,pr.nn_result)
+head(result)
+percent<-(round(pr.nn_result,2)-round(test$close,2))*100/round(test$close,2)
+res<-paste("Date:",new_dates,"Predicted:",round(pr.nn_result,2),"Real:",round(test$close,2),"Residuals:",paste(round(percent,2),"%"))
+head(res)
+MSE.nn<-sum((result$test.close-result$pr.nn_result)^2)/nrow(result)
+MSE.nn
+```
+
+Plot the trend 
+
+```{r ten}
+library(reshape2)
+library(ggplot2)
+library(ggthemes)
+final<-melt(result,id=c("new_dates"))
+fig_1<-ggplot(final,aes(x=new_dates,y=value,color=variable))+geom_line()+ggtitle("2014-02~2014-07 Real VS Predict ")+xlab("Month")+ylab("Index")+ylim(2000,2500)
+fig_1+theme_tufte()
+```
+
+##According to the correlation analysis  and generalized weights analysis that volume has little influence to the model, so build a new model without it.
+
+```{r eleven}
+nn.new<-neuralnet(close~open+high+low,data=train_,hidden=3,linear.output=TRUE)
+nn.new
+nn.new_hidden_2<-neuralnet(close~open+high+low,data=train_,hidden=2,linear.output=TRUE)
+nn.new_hidden_2
+par(mfrow=c(1,1))
+plot.nn(nn.new)
+ls(nn.new)
+nn.new$result.matrix
+```
+
+Using the new model to predict the close price
+
+```{r twelve}
+pr.nn.new<-compute(nn.new,test_[,c(1:3)])
+ls(pr.nn.new)
+pr.nn.new$net.result[1:20]
+pr.nn.new_result<-pr.nn.new$net.result*sd(A_index$close)+mean(A_index$close)
+par(mfrow=c(1,1))
+fig_2<-plot(test$close,pr.nn.new_result,ylab="Model nn_new predict value",xlab="Real value",col="blue",main="Real vs Predicted Neural Network",pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend("bottomright",legend="NN",pch=18,col="blue",bty="n")
+```
+
+Result table for prediction vs real value and MSE in new model
+
+```{r thirteen}
+result2<-data.frame(new_dates,test$close,pr.nn.new_result)
+head(result2)
+percent2<-(round(pr.nn.new_result,2)-round(test$close,2))*100/round(test$close,2)
+res_new<-paste("Date:",new_dates,"Predicted:",round(pr.nn.new_result,2),"Real:",round(test$close,2),"Residuals:",paste(round(percent2,2),"%"))
+head(res_new)
+MSE.nn_new<-sum((result2$test.close-result2$pr.nn.new_result)^2)/nrow(result2)
+MSE.nn_new
+```
+
+Plot the trend in new model
+
+```{r}
+final_new<-melt(result2,id=c("new_dates"))
+library(ggplot2)
+fig_2<-ggplot(final_new,aes(x=new_dates,y=value,color=variable))+geom_line()+ggtitle("2014-02~2014-07 Real VS Predict New ")+xlab("Month")+ylab("Index")
+fig_2+theme_tufte()
+```
+
+##The two RPROP neural network compare
+
+```{r}
+print(paste(MSE.nn,MSE.nn_new))
+par(mfrow=c(1,1))
+fig_3<-plot(test$close,pr.nn.new_result,ylab=" Predict value ",xlab="Real value",col="blue",main="Real vs Predicted Neural Network",pch=18,cex=0.7)
+points(test$close,pr.nn_result,col="red",pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend("bottomright",legend=c("nn_new","nn_2"),pch=18,col=c("blue","red"))
+```
+
+##Compare with BP neural network
+
+```{r}
+library(nnet)
+nn.net<-nnet(close~open+high+low,data=train_,size=3,linout=T,abstol=0.01)
+plot.nn(nn.net)
+net.predict<-predict(nn.net,test_[,c(1:3)])
+pr.nn.net_result<-net.predict*sd(A_index$close)+mean(A_index$close)
+result3<-data.frame(new_dates,test$close,pr.nn.net_result)
+MSE.nn_net<-sum((result3$test.close-result3$pr.nn.net_result)^2)/nrow(result3)
+result4<-result2
+result4$pr.nn.net_result<-pr.nn.net_result
+head(result4)
+print(paste(MSE.nn_new,MSE.nn_net))
+```
+
+```{r}
+par(mfrow=c(1,1))
+fig_4<-plot(test$close,pr.nn.new_result,ylab=" Predict value ",xlab="Real value",col="green",main="Real vs Predicted Neural Network",pch=18,cex=0.7)
+points(test$close,pr.nn.net_result,col="red",pch=18,cex=0.7)
+abline(0,1,lwd=2)
+legend("bottomright",legend=c("nn_new","nn_net"),pch=18,col=c("green","red"))
+```
+
+##Confidence Interval
+
+```{r}
+ci_nn_1<-confidence.interval(nn_2,alpha=0.05)
+ls(ci_nn_1)
+ci_nn_1$lower.ci
+ci_nn_1$upper.ci
+ci_nn_new<-confidence.interval(nn.new,alpha=0.05)
+ci_nn_new$lower.ci
+ci_nn_new$upper.ci
+```
+
+##Cross Validation
+
+Cross Validation for nn_2
+
+```{r}
+set.seed(450)
+cv.error_2<-NULL
+k2<-10
+library(plyr)
+pbar<-create_progress_bar('text')
+pbar$init(k2)
+for(i in 1:k2){
+  index<-sample(1:nrow(A_index),round(0.9*nrow(A_index)))
+  train_cv<-A_index[index,]
+  test_cv<-A_index[-index,]
+  train.cv<-scaled[index,]
+  test.cv<-scaled[-index,]
+  nn.cv_2<-neuralnet(close~open+high+low+volume,data=train.cv,hidden=3,linear.output=T)
+  test.cv$close<-NULL
+  pr.nn.cv_2<-compute(nn.cv_2,test.cv)
+  pr.nn.cv_new_2<-pr.nn.cv_2$net.result*sd(A_index$close)+mean(A_index$close)
+  test.cv.r<-test_cv$close
+  cv.error_2[i]<-sum((test.cv.r-pr.nn.cv_new_2)^2)/nrow(test.cv)
+  pbar$step()
+}
+cv.error_2
+mean(cv.error_2)
+```
+
+Boxplot for cv.error_2
+
+```{r}
+boxplot(cv.error_2,xlab="MSE CV",col='hotpink',border='red',names='CV error(MSE)',main='CV error(MSE) for nn_2',horizontal=T)
+```
+
+Cross validation for nn_new
+
+```{r}
+set.seed(450)
+cv.error<-NULL
+k<-10
+library(plyr)
+pbar<-create_progress_bar('text')
+pbar$init(k)
+for(i in 1:k){
+  index<-sample(1:nrow(A_index),round(0.9*nrow(A_index)))
+  train_cv<-A_index[index,]
+  test_cv<-A_index[-index,]
+  train.cv<-scaled[index,]
+  test.cv<-scaled[-index,]
+  nn.cv<-neuralnet(close~open+high+low,data=train.cv,hidden=3,linear.output=T)
+  test.cv$close<-NULL
+  pr.nn.cv<-compute(nn.cv,test.cv[,1:3])
+  pr.nn.cv_new<-pr.nn.cv$net.result*sd(A_index$close)+mean(A_index$close)
+  test.cv.r<-test_cv$close
+  cv.error[i]<-sum((test.cv.r-pr.nn.cv_new)^2)/nrow(test.cv)
+  pbar$step()
+}
+cv.error
+mean(cv.error)
+```
+
+Boxplot for cv.error
+
+```{r}
+boxplot(cv.error,xlab="MSE CV",col='steelblue',border='blue',names='CV error(MSE)',main='CV error(MSE) for nn_new',horizontal=T)
+```
+
+Cross Validation for nn_net
+
+```{r}
+set.seed(450)
+cv.error_3<-NULL
+k3<-10
+library(plyr)
+pbar<-create_progress_bar('text')
+pbar$init(k3)
+for(i in 1:k3){
+  index<-sample(1:nrow(A_index),round(0.9*nrow(A_index)))
+  train_cv<-A_index[index,]
+  test_cv<-A_index[-index,]
+  train.cv<-scaled[index,]
+  test.cv<-scaled[-index,]
+  nn.cv_3<-nnet(close~open+high+low,data=train.cv,size=3,linout=T,abstol=0.01)
+  test.cv$close<-NULL
+  pr.nn.cv_3<-predict(nn.cv_3,test.cv)
+  pr.nn.cv_new_3<-pr.nn.cv_3*sd(A_index$close)+mean(A_index$close)
+  test.cv.r<-test_cv$close
+  cv.error_3[i]<-sum((test.cv.r-pr.nn.cv_new_3)^2)/nrow(test.cv)
+  pbar$step()
+}
+cv.error_3
+mean(cv.error_3)
+```
+
+Boxplot for cv.error_3
+
+```{r}
+boxplot(cv.error_3,xlab="MSE CV",col='mediumturquoise',border='green',names='CV error(MSE)',main='CV error(MSE) for nn_net',horizontal=T)
+```
+
+## Predict data from 2014-7~2014-12
+```{r}
+getwd()
+setwd('/Users/zhoudan/Neural Network')
+new_data<-data.frame(read.csv("000002.csv",header=T))
+head(new_data)
+apply(new_data, 2, function(x) sum(is.na(x)))
+dates_new<-as.Date(new_data[,1])
+new_data$date<-NULL
+head(new_data)
+nrow(new_data)
+train_new<-new_data[c(0:600),]
+test_new<-new_data[c(601:726),]
+scaled_new<-as.data.frame(scale(new_data))
+train_new_<-scaled_new[c(0:600),]
+test_new_<-scaled_new[c(601:726),]
+head(train_new_)
+head(test_new_)
+library(neuralnet)
+nn.new_data<-neuralnet(close~open+high+low,data=train_new_,hidden=3,linear.output=TRUE)
+test_new_$close<-NULL
+pr.nn.new_data<-compute(nn.new_data,test_new_)
+pr.nn.new_result_data<-pr.nn.new_data$net.result*sd(new_data$close)+mean(new_data$close)
+Dates<-dates_new[601:726]
+result5<-data.frame(Dates,test_new$close,pr.nn.new_result_data)
+library(reshape)
+library(ggthemes)
+final_new_data<-melt(result5,id=c("Dates"))
+library(ggplot2)
+fig_5<-ggplot(final_new_data,aes(x=Dates,y=value,color=variable))+geom_line()+ggtitle("2014-07~2014-12 Real VS Predict")+xlab("Month")+ylab("Index")
+fig_5+theme_tufte()
+```
+
+
+
+
+
+
